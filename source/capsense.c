@@ -251,8 +251,8 @@ static void capsense_process(void)
     static uint16_t slider_pos_perv = 0;
 
     /* Variables used for storing command and data for LED Task */
-    led_command_data_t led_cmd_data;
-    bool send_led_command = false;
+    //led_command_data_t led_cmd_data;
+    //bool send_led_command = false;
 
 
     bool send_bt_command = false;
@@ -281,8 +281,8 @@ static void capsense_process(void)
     /* Detect new touch on Button0 */
     if((0u != button0_status) && (0u == button0_status_prev))
     {
-        led_cmd_data.command = LED_TURN_ON;
-        send_led_command = true;
+        //led_cmd_data.command = LED_TURN_ON;
+        //send_led_command = true;
         capsense_data.buttonstatus1 = 1u;
         send_bt_command = true;
     }
@@ -290,8 +290,8 @@ static void capsense_process(void)
     /* Detect new touch on Button1 */
     if((0u != button1_status) && (0u == button1_status_prev))
     {
-        led_cmd_data.command = LED_TURN_OFF;
-        send_led_command = true;
+        //led_cmd_data.command = LED_TURN_OFF;
+        //send_led_command = true;
         capsense_data.buttonstatus1 = 2u;
         send_bt_command = true;
     }
@@ -301,10 +301,10 @@ static void capsense_process(void)
         /* Slider value in percentage */
         slider_value = (slider_pos * 100) /
         cy_capsense_context.ptrWdConfig[CY_CAPSENSE_LINEARSLIDER0_WDGT_ID].xResolution;
-        led_cmd_data.command = LED_SET_BRIGHTNESS;
+        //led_cmd_data.command = LED_SET_BRIGHTNESS;
         /* Setting brightness value */
-        led_cmd_data.brightness = slider_value;
-        send_led_command = true;
+        //led_cmd_data.brightness = slider_value;
+        //send_led_command = true;
         /* Setting ble app data value */
         capsense_data.sliderdata = slider_value;
         send_bt_command = true;
@@ -312,10 +312,10 @@ static void capsense_process(void)
     }
 
     /* Send command to update LED state if required */
-    if(send_led_command)
+    /*if(send_led_command)
     {
         xQueueSendToBack(led_command_data_q, &led_cmd_data, 0u);
-    }
+    }*/
 
     if(send_bt_command)
     {

@@ -53,6 +53,7 @@
 #include "wiced_bt_types.h"
 #include "wiced_bt_gatt.h"
 #include "wiced_bt_stack.h"
+#include "wiced_bt_ble.h"
 #include "bt_app.h"
 #include "board.h"
 #include "capsense.h"
@@ -69,6 +70,21 @@
 
 /* Vervolgradatie: hoeveel slider-% verschil is 1 volumestap? */
 #define VOL_STEP_PERCENT   (2u)   /* 2% ≈ zachte, vloeiende stappen */
+
+static cyhal_pwm_t pwm_led;
+
+// andere namen dan die in board.h
+typedef enum { LEDM_OFF, LEDM_PULSE, LEDM_ON } ledm_mode_t;
+
+static void led_set(ledm_mode_t m)
+{
+    switch (m)
+    {
+        case LEDM_OFF:   cyhal_pwm_set_duty_cycle(&pwm_led, 0.0f, 2.0f);  break;
+        case LEDM_PULSE: cyhal_pwm_set_duty_cycle(&pwm_led, 50.0f, 1.0f); break; // 1 Hz
+        case LEDM_ON:    cyhal_pwm_set_duty_cycle(&pwm_led, 100.0f, 1.0f);break;
+    }
+}
 
 /*******************************************************************************
 * Global Variables
@@ -132,6 +148,29 @@ static void hid_send_cc_report(uint8_t bits)
                                                HDLC_HIDS_REPORT_VALUE, /* jouw value handle */
                                                1, &bits, NULL);
     }
+}
+
+/* Maak een klein ADV-pakket met Flags + Appearance + Complete Local Name */
+static wiced_result_t set_minimal_adv_flags_only(void)
+{
+    uint8_t adv[3 + 2];  // genoeg
+    uint8_t a = 0;
+
+    /* Flags AD structure: len=2, type=0x01, data=0x06 (General Disc + BR/EDR not supported) */
+    adv[a++] = 2;     // length (type + 1 byte data)
+    adv[a++] = 0x01;  // AD type: Flags
+    adv[a++] = 0x06;  // data
+
+    /* Stop ADV, zet data, start later opnieuw */
+    wiced_bt_start_advertisements(BTM_BLE_ADVERT_OFF, 0, NULL);
+    wiced_result_t r1 = wiced_bt_ble_set_raw_advertisement_data(a, adv);
+    printf("Set RAW ADV (flags) len=%u -> 0x%04X\r\n", a, r1);
+
+    /* Lege scan response – geef len=0 en pointer = NULL (sommige stacks eisen NULL) */
+    wiced_result_t r2 = wiced_bt_ble_set_raw_scan_response_data(0, NULL);
+    printf("Clear RAW SCAN -> 0x%04X\r\n", r2);
+
+    return r1;
 }
 
 
@@ -224,8 +263,12 @@ void bt_app_init(void)
         CY_ASSERT(0u);
     }
 
-    /* Set user led status */
-    board_led_set_blink(USER_LED1, BLINK_SLOW);
+    // LED init
+    if (CY_RSLT_SUCCESS == cyhal_pwm_init(&pwm_led, CYBSP_USER_LED, NULL))
+    {
+        cyhal_pwm_set_duty_cycle(&pwm_led, 0.0f, 2.0f);
+        cyhal_pwm_start(&pwm_led);
+    }
 }
 
 
@@ -255,8 +298,10 @@ wiced_result_t bt_app_management_cb(wiced_bt_management_evt_t event,
 
     switch (event)
     {
-        case BTM_ENABLED_EVT:
-            /* Bluetooth Controller and Host Stack Enabled */
+    	//COMMENTED FOR TESTING PURPOSES
+
+        /*case BTM_ENABLED_EVT:
+            // Bluetooth Controller and Host Stack Enabled
             if (WICED_BT_SUCCESS == p_event_data->enabled.status)
             {
                 wiced_bt_set_local_bdaddr(cy_bt_device_address, BLE_ADDR_PUBLIC);
@@ -264,25 +309,80 @@ wiced_result_t bt_app_management_cb(wiced_bt_management_evt_t event,
                 printf("Bluetooth local device address: ");
                 bt_print_bd_address(local_bda);
 
-                /* Perform application-specific initialization */
+                // Perform application-specific initialization
                 bt_app_init();
             }
             else
             {
-                printf("Bluetooth enable failed, status = %d \r\n",
-                                                p_event_data->enabled.status);
+                printf("Bluetooth enable failed, status = %d \r\n", p_event_data->enabled.status);
             }
-            break;
+            break;*/
+
+		case BTM_ENABLED_EVT:
+			if (WICED_BT_SUCCESS == p_event_data->enabled.status)
+			{
+				wiced_bt_set_local_bdaddr(cy_bt_device_address, BLE_ADDR_PUBLIC);
+				wiced_bt_device_address_t local_bda = {0};
+				wiced_bt_dev_read_local_addr(local_bda);
+				printf("Bluetooth local device address: ");
+				bt_print_bd_address(local_bda);
+
+				bt_app_init();  // PWM/LED init
+
+				// Pairable + discoverable + connectable
+				wiced_bt_set_pairable_mode(WICED_TRUE, WICED_TRUE);
+				wiced_bt_dev_set_discoverability(BTM_GENERAL_DISCOVERABLE, 0, 0);
+				wiced_bt_dev_set_connectability(BTM_CONNECTABLE, 0, 0);
+
+				// Start advertising volgens configurator
+				wiced_bt_start_advertisements(BTM_BLE_ADVERT_UNDIRECTED_HIGH, 0, NULL);
+				led_set(LEDM_PULSE);
+			}
+			else
+			{
+				printf("Bluetooth enable failed, status = %d \r\n", p_event_data->enabled.status);
+			}
+			break;
+
+		case BTM_BLE_ADVERT_STATE_CHANGED_EVT:
+			printf("Bluetooth advertisement state change: 0x%x\r\n",
+				   p_event_data->ble_advert_state_changed);
+			if (p_event_data->ble_advert_state_changed == BTM_BLE_ADVERT_OFF)
+				led_set(LEDM_OFF);
+			else
+				led_set(LEDM_PULSE);
+			break;
 
         case BTM_DISABLED_EVT:
             break;
 
-        case BTM_BLE_ADVERT_STATE_CHANGED_EVT:
+        case BTM_PAIRING_IO_CAPABILITIES_BLE_REQUEST_EVT:
+        {
+            /* Forceer Just Works (geen pincode), wel bond + encryptie */
+            p_event_data->pairing_io_capabilities_ble_request.local_io_cap = BTM_IO_CAPABILITIES_NONE;
+            p_event_data->pairing_io_capabilities_ble_request.oob_data     = BTM_OOB_NONE;
+            p_event_data->pairing_io_capabilities_ble_request.auth_req     = BTM_LE_AUTH_REQ_BOND;  // bonden, geen MITM (Just Works)
+            p_event_data->pairing_io_capabilities_ble_request.max_key_size = 16;
+            p_event_data->pairing_io_capabilities_ble_request.init_keys    =
+                    BTM_LE_KEY_PENC | BTM_LE_KEY_PID | BTM_LE_KEY_PCSRK;
+            p_event_data->pairing_io_capabilities_ble_request.resp_keys    =
+                    BTM_LE_KEY_PENC | BTM_LE_KEY_PID | BTM_LE_KEY_PCSRK |
+                    BTM_LE_KEY_LENC | BTM_LE_KEY_LCSRK;
 
-            /* Advertisement State Changed */
-            printf("Bluetooth advertisement state change: 0x%x\r\n",
-                                     p_event_data->ble_advert_state_changed);
+            result = WICED_BT_SUCCESS;
             break;
+        }
+
+        case BTM_SECURITY_REQUEST_EVT:
+        {
+            // Peer vraagt om beveiliging; sta Just Works toe
+            wiced_bt_ble_security_grant(p_event_data->security_request.bd_addr,
+                                        WICED_BT_SUCCESS);
+            printf("SECURITY REQUEST -> grant sent\r\n");
+
+            result = WICED_BT_SUCCESS;
+            break;
+        }
 
         case BTM_BLE_CONNECTION_PARAM_UPDATE:
             printf("Bluetooth connection parameter update status:%d\r\n"
@@ -304,10 +404,44 @@ wiced_result_t bt_app_management_cb(wiced_bt_management_evt_t event,
                     p_event_data->ble_phy_update_event.rx_phy);
             break;
 
-        case BTM_PIN_REQUEST_EVT:
+        /*case BTM_PIN_REQUEST_EVT:
+            // We ondersteunen geen manuele PIN; antwoord “ok” met 0 cijfers.
+            wiced_bt_dev_pin_code_reply(p_event_data->pin_request.bd_addr,
+                                        WICED_BT_SUCCESS, 0, NULL);
+            result = WICED_BT_SUCCESS;
+            break;
+
         case BTM_PASSKEY_REQUEST_EVT:
-             result = WICED_BT_ERROR;
-             break;
+            // Just Works: geen passkey – maak het expliciet success zonder key.
+            wiced_bt_dev_pass_key_req_reply(WICED_BT_SUCCESS, p_event_data->user_passkey_request.bd_addr, 0);
+            result = WICED_BT_SUCCESS;
+            break;*/
+
+        case BTM_ENCRYPTION_STATUS_EVT:
+            printf("Encrypt status: res=0x%02X\r\n",
+                   p_event_data->encryption_status.result);
+            break;
+
+        case BTM_PAIRING_COMPLETE_EVT:
+            printf("Pairing complete: res=0x%02X, reason=0x%02X\r\n",
+                   p_event_data->pairing_complete.pairing_complete_info.ble.status,
+                   p_event_data->pairing_complete.pairing_complete_info.ble.reason);
+            break;
+
+        case BTM_PAIRED_DEVICE_LINK_KEYS_UPDATE_EVT:
+        {
+            wiced_bt_device_link_keys_t *keys =
+                &p_event_data->paired_device_link_keys_update;
+            wiced_result_t r =
+                wiced_bt_dev_add_device_to_address_resolution_db(keys);
+            printf("Keys UPDATE -> 0x%02X\r\n", r);
+            break;
+        }
+
+        case BTM_PAIRED_DEVICE_LINK_KEYS_REQUEST_EVT:
+            // Gebruik je geen eigen storage? Log alleen; stack hanteert z’n cache.
+            printf("Keys REQUEST\r\n");
+            break;
 
         default:
             break;
@@ -340,13 +474,26 @@ wiced_bt_gatt_status_t bt_app_gatt_event_cb(wiced_bt_gatt_evt_t event,
      * pass the relevant event parameters to the callback function */
     switch (event)
     {
-        case GATT_CONNECTION_STATUS_EVT:
-            status = bt_app_gatt_conn_status_cb(&p_event_data->connection_status );
-            if(WICED_BT_GATT_SUCCESS != status)
-            {
-               printf("GATT connection status failed: 0x%x\r\n", status);
-            }
-            break;
+    case GATT_CONNECTION_STATUS_EVT:
+        if (p_event_data->connection_status.connected)
+        {
+            printf("GATT connected: conn_id:%d\r\n",
+                   p_event_data->connection_status.conn_id);
+
+            bt_connection_id = p_event_data->connection_status.conn_id; // <-- BELANGRIJK
+            led_set(LEDM_ON);
+        }
+        else
+        {
+            printf("GATT disconnected: reason:0x%02X\r\n",
+                   p_event_data->connection_status.reason);
+
+            bt_connection_id = 0;                                        // <-- clear bij disconnect
+            led_set(LEDM_PULSE);
+            wiced_bt_start_advertisements(BTM_BLE_ADVERT_UNDIRECTED_HIGH, 0, NULL);
+        }
+        status = WICED_BT_GATT_SUCCESS;
+        break;
 
         case GATT_ATTRIBUTE_REQUEST_EVT:
             status = bt_app_gatt_req_cb(p_attr_req);

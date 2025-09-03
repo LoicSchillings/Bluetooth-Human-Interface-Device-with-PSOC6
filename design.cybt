@@ -37,9 +37,9 @@
                                         <Field>
                                             <FieldProperties>
                                                 <Property id="Name" value="Name"/>
-                                                <Property id="Value" value="CapSense Button Slider"/>
+                                                <Property id="Value" value="BT Media Controller"/>
                                                 <Property id="Format" value="f_utf8s"/>
-                                                <Property id="ByteLength" value="22"/>
+                                                <Property id="ByteLength" value="19"/>
                                             </FieldProperties>
                                         </Field>
                                     </Fields>
@@ -71,7 +71,7 @@
                                         <Field>
                                             <FieldProperties>
                                                 <Property id="Name" value="Category"/>
-                                                <Property id="EnumValue" value="512"/>
+                                                <Property id="EnumValue" value="384"/>
                                                 <Property id="Format" value="f_16bit"/>
                                             </FieldProperties>
                                         </Field>
@@ -359,11 +359,11 @@
     </Profiles>
     <GAP>
         <General>
-            <Property id="DeviceAddress" value="00A050-000000"/>
+            <Property id="DeviceAddress" value="00A050-231004"/>
             <Property id="MacGeneratedAddress" value="false"/>
-            <Property id="DeviceName" value="CapSense Button Slider"/>
-            <Property id="Appearance" value="512"/>
-            <Property id="HostTxPowerLevel" value="Pos_0"/>
+            <Property id="DeviceName" value="BT Media Controller"/>
+            <Property id="Appearance" value="384"/>
+            <Property id="HostTxPowerLevel" value="Pos_4"/>
             <Property id="EnableRpaTimeout" value="false"/>
             <Property id="FilterAcceptListSize" value="0"/>
         </General>
@@ -399,6 +399,8 @@
                     <Property id="DiscoveryMode" value="General"/>
                     <Property id="AdLocalName" value="true"/>
                     <Property id="LocalNameType" value="Complete"/>
+                    <Property id="AdServiceUuid" value="true"/>
+                    <Property id="ServiceUuid" value=""/>
                     <Property id="AdAppearance" value="true"/>
                 </AdvertisementPacket>
                 <ScanResponsePacket>
