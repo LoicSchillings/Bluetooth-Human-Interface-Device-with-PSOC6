@@ -57,6 +57,8 @@
 #include "bt_app.h"
 #include "board.h"
 #include "capsense.h"
+#include "FreeRTOS.h"
+#include "task.h"
 
 
 /*******************************************************************************
@@ -96,6 +98,12 @@ volatile uint16_t bt_connection_id = 0;
  */
 typedef void (*pfn_free_buffer_t)(uint8_t *);
 
+// Extern API voor capsense.c
+void bt_hid_play_pause(void);
+void bt_hid_mute(void);
+void bt_hid_volume_up(void);
+void bt_hid_volume_down(void);
+
 
 /*******************************************************************************
 * Function Prototypes
@@ -125,6 +133,62 @@ static void* bt_app_alloc_buffer(int len);
 static void  bt_app_free_buffer(uint8_t *p_event_data);
 static void  bt_print_bd_address(wiced_bt_device_address_t bdadr);
 
+// ======= HID Consumer Control helpers (publiek gebruikt door capsense.c) =======
+/*void bt_hid_send_cc_mask(uint8_t mask)
+{
+    if (bt_connection_id == 0) return;            // niet verbonden → niks doen
+
+    printf("HID report: 0x%02X\r\n", mask);
+
+    // 1-byte input report (Report ID=1 volgens jouw Report Map)
+    app_hids_report[0] = mask;
+    wiced_bt_gatt_server_send_notification(bt_connection_id,
+                                           HDLC_HIDS_REPORT_VALUE,
+                                           app_hids_report_len,
+                                           app_hids_report,
+                                           NULL);
+
+    // "release" sturen
+    app_hids_report[0] = 0x00;
+    wiced_bt_gatt_server_send_notification(bt_connection_id,
+                                           HDLC_HIDS_REPORT_VALUE,
+                                           app_hids_report_len,
+                                           app_hids_report,
+                                           NULL);
+}
+
+// Makkelijkere wrappers
+void bt_hid_play_pause(void)   { bt_hid_send_cc_mask(0b0001); } // bit0
+void bt_hid_mute(void)         { bt_hid_send_cc_mask(0b0010); } // bit1
+void bt_hid_volume_up(void)    { bt_hid_send_cc_mask(0b0100); } // bit2
+void bt_hid_volume_down(void)  { bt_hid_send_cc_mask(0b1000); } // bit3*/
+
+static inline void hid_notify_press_release(uint8_t mask)
+{
+    if (bt_connection_id == 0) return;
+
+    app_hids_report[0] = mask;
+    wiced_result_t r1 = wiced_bt_gatt_server_send_notification(
+            bt_connection_id, HDLC_HIDS_REPORT_VALUE,
+            app_hids_report_len, app_hids_report, NULL);
+    printf("HID report: 0x%02X (send r=0x%02X)\r\n", mask, r1);
+
+    /* heel kort wachten zodat host de “press” ziet */
+    vTaskDelay(pdMS_TO_TICKS(10));  // 10 ms is doorgaans genoeg
+
+    app_hids_report[0] = 0x00;
+    wiced_result_t r2 = wiced_bt_gatt_server_send_notification(
+            bt_connection_id, HDLC_HIDS_REPORT_VALUE,
+            app_hids_report_len, app_hids_report, NULL);
+    printf("HID report: 0x00 (release r=0x%02X)\r\n", r2);
+}
+
+// wrappers die je vanuit capsense.c aanroept
+void bt_hid_play_pause(void)   { hid_notify_press_release(0b0001); } // bit0
+void bt_hid_mute(void)         { hid_notify_press_release(0b0010); } // bit1
+void bt_hid_volume_up(void)    { hid_notify_press_release(0b0100); } // bit2
+void bt_hid_volume_down(void)  { hid_notify_press_release(0b1000); } // bit3
+
 /* Externs uit cycfg_gatt_db.c voor jouw HID Report & CCCD */
 extern uint8_t app_hids_report[];                       /* opslag voor Input Report (1 byte) */
 extern const uint16_t app_hids_report_len;
@@ -134,6 +198,18 @@ static inline bool hid_cccd_enabled(void)
 {
     /* bit0 = notifications enabled */
     return (app_hids_report_client_char_config[0] & 0x01) != 0;
+}
+
+static inline void hid_notify(uint8_t val)
+{
+    if (bt_connection_id == 0) return;
+    // 1-byte input report (Report ID = 1 in je Report Map)
+    app_hids_report[0] = val;           // bit0=Play/Pause, bit1=Mute, bit2=Vol+, bit3=Vol-
+    wiced_bt_gatt_server_send_notification(bt_connection_id,
+                                           HDLC_HIDS_REPORT_VALUE,
+                                           app_hids_report_len,
+                                           app_hids_report,
+                                           NULL);
 }
 
 /* (optioneel) laatste verstuurde report byte bijhouden voor READ-requests */

@@ -99,6 +99,10 @@ cy_stc_syspm_callback_t capsense_deep_sleep_cb =
     NULL
 };
 
+void bt_hid_play_pause(void);
+void bt_hid_mute(void);
+void bt_hid_volume_up(void);
+void bt_hid_volume_down(void);
 
 /*******************************************************************************
 * Function Prototypes
@@ -285,6 +289,10 @@ static void capsense_process(void)
         //send_led_command = true;
         capsense_data.buttonstatus1 = 1u;
         send_bt_command = true;
+
+        bt_hid_play_pause();
+
+        printf("Button 0 \n\r");
     }
 
     /* Detect new touch on Button1 */
@@ -294,7 +302,15 @@ static void capsense_process(void)
         //send_led_command = true;
         capsense_data.buttonstatus1 = 2u;
         send_bt_command = true;
+
+        bt_hid_mute();
+
+        printf("Button 1 \n\r");
     }
+
+    static int8_t last_slider_pct = -1;     // -1 = nog geen geldige waarde
+    const uint8_t SLIDER_STEP = 3;
+
     /* Detect new touch on slider */
     if((0u != slider_touched) && (slider_pos_perv != slider_pos ))
     {
@@ -308,6 +324,21 @@ static void capsense_process(void)
         /* Setting ble app data value */
         capsense_data.sliderdata = slider_value;
         send_bt_command = true;
+
+        printf("Slider: %d \n\r", slider_value);
+
+        if (last_slider_pct < 0) {
+			last_slider_pct = (int8_t)slider_value;
+		} else {
+			int diff = (int)slider_value - (int)last_slider_pct;
+			if (diff >= SLIDER_STEP) {
+				bt_hid_volume_up();         // <-- HID pulse
+				last_slider_pct = (int8_t)slider_value;
+			} else if (diff <= -(int)SLIDER_STEP) {
+				bt_hid_volume_down();       // <-- HID pulse
+				last_slider_pct = (int8_t)slider_value;
+			}
+		}
 
     }
 
